@@ -1,0 +1,154 @@
+# Maven
+# Build your Java project and run tests with Apache Maven.
+# Add steps that analyze code, save build artifacts, deploy, and more:
+# https://docs.microsoft.com/azure/devops/pipelines/languages/java
+
+trigger:
+- azure-pipelines
+
+pool:
+  vmImage: ubuntu-latest
+
+stages:
+- stage: Build
+  jobs:
+  - job: Preperation
+    steps:
+    - task: Bash@3
+      displayName: 'check java'
+      inputs:
+        targetType: 'inline'
+        script: |
+          java -version
+
+  - job: BuildAndTest
+    dependsOn: Preperation
+    steps:
+    - task: Bash@3
+      displayName: 'clean'
+      inputs:
+        targetType: 'inline'
+        script: |
+          chmod +x mvnw
+          ./mvnw -ntp clean -P-webapp
+          
+    - task: Bash@3
+      displayName: 'nohttp'
+      inputs:
+        targetType: 'inline'
+        script: |
+          ./mvnw -ntp checkstyle:check
+          
+    - task: Bash@3
+      displayName: 'install tools'
+      inputs:
+        targetType: 'inline'
+        script: |
+          ./mvnw -ntp com.github.eirslett:frontend-maven-plugin:install-node-and-npm@install-node-and-npm
+          
+    - task: Bash@3
+      displayName: 'npm install'
+      inputs:
+        targetType: 'inline'
+        script: |
+          ./mvnw -ntp com.github.eirslett:frontend-maven-plugin:npm
+
+    - task: Bash@3
+      displayName: 'backend tests'
+      inputs:
+        targetType: 'inline'
+        script: |
+          ./mvnw -ntp verify -P-webapp
+       
+    - task: PublishTestResults@2
+      displayName: 'publish backend tests'
+      inputs:
+        testResultsFormat: 'JUnit'
+        testResultsFiles: |
+          **/target/surefire-reports/TEST-*.xml
+          **/target/failsafe-reports/TEST-*.xml
+
+    - task: Bash@3
+      displayName: 'frontend tests'
+      inputs:
+        targetType: 'inline'
+        script: |
+          ./mvnw -ntp com.github.eirslett:frontend-maven-plugin:npm -Dfrontend.npm.arguments='run test-ci'
+          
+    - task: PublishTestResults@2
+      displayName: 'publish frontend tests'
+      inputs:
+        testResultsFormat: 'JUnit'
+        testResultsFiles: |
+          **/target/test-results/TESTS-results-jest.xml
+
+    - task: SonarQubePrepare@5
+      inputs:
+        SonarQube: 'SonarQube'
+        scannerMode: 'Other'
+
+    - script: |
+        FILTERED_PARAMS=$(echo $SONARQUBE_SCANNER_PARAMS | sed 's/"sonar.branch.name":"[^"]*"\,//g')
+        echo "##vso[task.setvariable variable=SONARQUBE_SCANNER_PARAMS]$FILTERED_PARAMS"
+      displayName: Filter out non-CE sonar parameters
+
+    - task: Bash@3
+      displayName: 'quality analysis'
+      inputs:
+        targetType: 'inline'
+        script: |
+          ./mvnw -ntp initialize sonar:sonar
+
+    - task: SonarQubePublish@5
+      inputs:
+        pollingTimeoutSec: '300'
+
+    - task: ServiceNow-DevOps-Build-Sonar-Registration@1
+      inputs:
+        connectedServiceName: 'int4mbgroup-ServiceNow-ServiceNow DevOps Service Connection'
+        sonarProjectKey: 'ServiceNow_devops-data-model_AYMSxQMPLOlpThw-03oe'
+        sonarInstanceUrl: 'https://now-sonar.dot.i.mercedes-benz.com/'
+        
+    - task: PublishBuildArtifacts@1
+      inputs:
+        PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+        ArtifactName: 'devops-java-demo.jar'
+        publishLocation: 'Container'
+
+- stage: Approval
+  jobs:
+  - job: Change
+    pool: server
+    steps:  
+    - task: ServiceNow-DevOps-Server-Change-Acceleration@1
+      inputs:
+        connectedServiceName: 'int4mbgroup-ServiceNow-ServiceNow DevOps Service Connection'
+        changeRequestDetails: |
+          {
+            "setCloseCode": true,
+            "attributes": {
+              "short_description": "Test description",
+              "priority": "1",
+              "start_date": "2023-04-05 08:00:00",
+              "end_date": "2023-04-05 09:00:00",
+              "justification": "test justification",
+              "description": "test description",
+              "cmdb_ci": "0e9e496a1b9bc950a3d362406b4bcbf6",
+              "business_service": "78d1854fdbf9b4d036b84f63059619a7",
+              "u_service_instance": "0e9e496a1b9bc950a3d362406b4bcbf6",
+              "service_offering":"3127291bdb35701036b84f630596198e",
+              "requested_by": "3948666ae7012300dd926217c2f6a967"
+            }
+          }
+
+- stage: Deployment
+  jobs:
+  - job: ProdDeployment
+    steps:
+    - task: Bash@3
+      inputs:
+        targetType: 'inline'
+        script: |
+          # Write your commands here
+          
+          echo 'Prod Deploy...'
