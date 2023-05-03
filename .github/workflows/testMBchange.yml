@@ -1,6 +1,6 @@
 # This is a basic workflow to help you get started with Actions
 
-name: TestChangeCreation3
+name: testMBchange
 
 on:
   workflow_dispatch:
